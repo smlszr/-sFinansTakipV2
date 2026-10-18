@@ -322,10 +322,10 @@
       <button class="btn btn-primary" id="authSubmit" onclick="authSubmit()">Giriş Yap</button>
       <button class="btn btn-ghost" id="authSwitch" onclick="authSwitchMode()">Hesap Oluştur</button>
     </div>
-    <details style="margin-top:16px">
-      <summary style="cursor:pointer;font-size:12.5px;color:var(--muted);font-weight:600">☁️ Bulut ayarları (Firebase) — başka cihazdan giriş için</summary>
-      <div class="field" style="margin-top:10px"><label>Veritabanı URL</label><input type="text" id="authCloudUrl" placeholder="https://proje-adi-default-rtdb.europe-west1.firebasedatabase.app"></div>
-      <div class="field" style="margin-top:8px"><label>Gizli Anahtar</label><input type="text" id="authCloudKey" placeholder="örn. benim-ozel-anahtar-2026"></div>
+    <details style="margin-top:16px" id="authCloudBox">
+      <summary style="cursor:pointer;font-size:12.5px;color:var(--muted);font-weight:600">☁️ Bulut veritabanı adresi (bir kez girilir)</summary>
+      <p class="hint" style="margin-top:8px">Firebase adresini bu cihazda bir kez girin; sonra yalnızca kullanıcı adı ve şifreyle giriş yaparsınız. Başka cihazda açtığınız hesap için <b>yeni hesap açmayın</b>, "Giriş Yap"a basın.</p>
+      <div class="field" style="margin-top:10px"><label>Veritabanı Adresi</label><input type="text" id="authCloudUrl" placeholder="https://proje-adi-default-rtdb.europe-west1.firebasedatabase.app"></div>
     </details>
     <p class="hint" style="margin-top:16px">⚠️ Şifrenizi unutursanız verilerinize erişilemez; şifreyi güvenli bir yerde saklayın.</p>
   </div>
@@ -1000,24 +1000,28 @@
 
       <div class="card">
         <h2><span class="ic">☁️</span> Bulut Senkronizasyonu (Firebase — ücretsiz)</h2>
-        <p class="hint" style="margin-bottom:12px">Verilerinizi Google'ın ücretsiz Firebase bulutuna otomatik senkronize eder. Aynı URL + anahtarla her cihazdan aynı veriye ulaşırsınız.</p>
+        <p class="hint" style="margin-bottom:12px">Verileriniz şifrelenerek ücretsiz Firebase bulutuna otomatik senkronize edilir. Bulut konumu <b>kullanıcı adınız ve şifrenizden otomatik üretilir</b> — başka bir cihazda aynı kullanıcı adı ve şifreyle giriş yapmanız yeterlidir, anahtar girmenize gerek yoktur.</p>
+        <div id="cloudBuiltinNote" class="badge green" style="display:none;margin-bottom:12px">✓ Veritabanı adresi uygulamaya tanımlı — tüm cihazlarda otomatik kullanılır</div>
         <div class="form-grid">
-          <div class="field full"><label>Firebase Veritabanı URL'si</label>
+          <div class="field full"><label>Firebase Veritabanı Adresi <span class="hint">(boş bırakılırsa uygulamadaki tanımlı adres kullanılır)</span></label>
             <input type="text" id="cloudUrl" placeholder="https://proje-adi-default-rtdb.europe-west1.firebasedatabase.app"></div>
-          <div class="field"><label>Gizli Anahtar</label>
-            <input type="text" id="cloudKey" placeholder="örn. benim-ozel-anahtar-2026"></div>
           <div class="field"><label>Otomatik Senkron</label>
             <label style="display:flex;align-items:center;gap:8px;font-weight:600;cursor:pointer;margin-top:6px">
               <input type="checkbox" id="cloudEnabled" style="width:auto"> Açık
             </label></div>
         </div>
+        <details style="margin-top:10px">
+          <summary style="cursor:pointer;font-size:12.5px;color:var(--muted);font-weight:600">Eski gizli anahtar (yalnızca eski sürümden veri taşımak için)</summary>
+          <div class="field" style="margin-top:8px;max-width:360px"><label>Eski Gizli Anahtar</label>
+            <input type="text" id="cloudKey" placeholder="daha önce kullandığınız anahtar"></div>
+          <p class="hint">Daha önce gizli anahtarla senkron yaptıysanız buraya girip kaydedin; verileriniz bir kez yeni otomatik konuma taşınır, sonra bu alana gerek kalmaz.</p>
+        </details>
         <div class="form-actions">
           <button class="btn btn-primary" onclick="saveCloudSettings()">Ayarları Kaydet</button>
           <button class="btn btn-ghost" onclick="forceCloudPush()">Buluta Gönder</button>
           <button class="btn btn-ghost" onclick="forceCloudPull()">Buluttan Yükle</button>
         </div>
         <div id="cloudStatus" style="margin-top:12px;font-size:13px"></div>
-        <p class="hint" style="margin-top:12px">Kurulum: console.firebase.google.com → "Proje ekle" → Realtime Database oluştur → "Test modunda" etkinleştir → üstteki URL'yi buraya yapıştırın.</p>
       </div>
 
       <div class="card">
@@ -3988,28 +3992,65 @@ function toggleTheme(){
 }
 
 /* ============================== BULUT SENKRONİZASYONU (Firebase) ============================== */
+// Uygulamaya gömülü veritabanı adresi: her cihazda otomatik kullanılır (Yedekleme'den değiştirilebilir)
+var DEFAULT_CLOUD_URL = 'https://workandfinanceapp-default-rtdb.europe-west1.firebasedatabase.app';
+var CLOUD_ROOT = 'isFinansTakipV2';
 var cloudTimer = null;
+var sessionCloudId = null;
 function getCloudSettings(){
-  try{ var c = JSON.parse(localStorage.getItem(CLOUD_KEY)); if(c) return c; }catch(e){}
-  return {databaseURL:'', secretKey:'', enabled:false};
+  var c = null;
+  try{ c = JSON.parse(localStorage.getItem(CLOUD_KEY)); }catch(e){}
+  c = c || {};
+  if(c.databaseURL == null) c.databaseURL = '';
+  if(c.secretKey == null) c.secretKey = '';
+  if(c.enabled == null) c.enabled = true;   // varsayılan: otomatik senkron açık
+  return c;
 }
 function setCloudSettings(c){
   try{ localStorage.setItem(CLOUD_KEY, JSON.stringify(c)); }catch(e){}
 }
-function cloudConfigured(){
-  var s = getCloudSettings();
-  return !!(s.databaseURL && s.secretKey);
-}
-function cloudEnabled(){
-  return cloudConfigured() && getCloudSettings().enabled && !!sessionUser;
-}
 function cloudBaseUrl(){
-  return (getCloudSettings().databaseURL || '').replace(/\/+$/,'');
+  return (getCloudSettings().databaseURL || DEFAULT_CLOUD_URL || '').trim().replace(/\/+$/,'');
 }
-function cloudFullUrl(username){
-  var key = encodeURIComponent(getCloudSettings().secretKey || 'default');
-  var u = encodeURIComponent(username || sessionUser || 'anonim');
-  return cloudBaseUrl() + '/isFinansTakipV2/' + key + '/' + u + '.json';
+function cloudConfigured(){ return /^https:\/\/.+/.test(cloudBaseUrl()); }
+function cloudEnabled(){ return cloudConfigured() && getCloudSettings().enabled !== false && !!sessionUser && !!sessionCloudId; }
+// Buluttaki kaydın yeri kullanıcı adı + şifreden türetilir: doğru şifreyi bilen her cihaz aynı kaydı bulur,
+// yanlış şifreyle kayıt bulunamaz. Ayrıca gizli anahtar girmeye gerek kalmaz.
+function deriveCloudId(user, pass){
+  try{
+    var enc = new TextEncoder();
+    return crypto.subtle.importKey('raw', enc.encode(user + '\u0000' + pass), 'PBKDF2', false, ['deriveBits']).then(function(base){
+      return crypto.subtle.deriveBits({name:'PBKDF2', salt:enc.encode('isFinansTakip-bulut-v3'), iterations:120000, hash:'SHA-256'}, base, 256);
+    }).then(function(bits){
+      return Array.prototype.map.call(new Uint8Array(bits), function(b){ return ('0' + b.toString(16)).slice(-2); }).join('');
+    });
+  }catch(e){ return Promise.reject(e); }
+}
+function cloudUrlForId(id){ return cloudBaseUrl() + '/' + CLOUD_ROOT + '/v3/' + id + '.json'; }
+function legacyCloudUrl(user){
+  var key = getCloudSettings().secretKey;
+  if(!key) return null;
+  return cloudBaseUrl() + '/' + CLOUD_ROOT + '/' + encodeURIComponent(key) + '/' + encodeURIComponent(user) + '.json';
+}
+function cloudGet(url){
+  return fetch(url, {cache:'no-store'}).then(function(r){
+    if(r.status === 404) return null;
+    if(!r.ok) throw new Error(r.status === 401 || r.status === 403 ? 'Veritabanı erişimi reddedildi (Firebase kurallarını kontrol edin)' : 'HTTP ' + r.status);
+    return r.json();
+  });
+}
+// Önce yeni (otomatik) konuma, yoksa eski gizli anahtarlı konuma bakar
+function cloudFindRecord(user, id){
+  if(!cloudConfigured() || !id) return Promise.resolve(null);
+  return cloudGet(cloudUrlForId(id)).then(function(rec){
+    if(rec && rec.vault) return rec;
+    var lu = legacyCloudUrl(user);
+    if(!lu) return null;
+    return cloudGet(lu).then(function(old){
+      if(old && old.vault && old.username === user){ old._legacy = true; return old; }
+      return null;
+    }).catch(function(){ return null; });
+  });
 }
 function setCloudStatus(state, msg){
   var el = document.getElementById('cloudStatus');
@@ -4021,6 +4062,8 @@ function setCloudStatus(state, msg){
     el.innerHTML = '<span style="color:var(--red);font-weight:600">⚠ Hata: ' + esc(m) + '</span>';
   } else if(state === 'syncing'){
     el.innerHTML = '<span style="color:var(--muted)">⏳ Senkronize ediliyor…</span>';
+  } else if(state === 'off'){
+    el.innerHTML = '<span style="color:var(--muted)">' + esc(msg || 'Bulut senkronu kapalı') + '</span>';
   }
 }
 function cloudSchedulePush(){
@@ -4029,92 +4072,88 @@ function cloudSchedulePush(){
   cloudTimer = setTimeout(cloudPush, 900);
 }
 function cloudPush(){
-  if(!cloudEnabled()) return;
+  if(!cloudEnabled()) return Promise.resolve();
   var salt = getUserSalt(sessionUser), vault = getVaultFor(sessionUser);
-  if(!salt || !vault) return;
-  var rec = {username: sessionUser, salt: salt, vault: {iv: vault.iv, ct: vault.ct}, updatedAt: vault.updatedAt || 0};
+  if(!salt || !vault) return Promise.resolve();
+  var rec = {v:3, salt: salt, vault: {iv: vault.iv, ct: vault.ct}, updatedAt: vault.updatedAt || 0};
   setCloudStatus('syncing');
-  fetch(cloudFullUrl(sessionUser), {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(rec)})
-    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); setCloudStatus('ok', new Date().toLocaleTimeString('tr-TR')); })
+  return fetch(cloudUrlForId(sessionCloudId), {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(rec)})
+    .then(function(r){ if(!r.ok) throw new Error(r.status === 401 || r.status === 403 ? 'Yazma izni yok (Firebase kurallarını kontrol edin)' : 'HTTP '+r.status); setCloudStatus('ok', new Date().toLocaleTimeString('tr-TR')); })
     .catch(function(err){ setCloudStatus('error', err); });
 }
-function cloudPullRecord(username){
-  if(!cloudConfigured()) return Promise.resolve(null);
-  return fetch(cloudFullUrl(username)).then(function(r){
-    if(r.status === 404) return null;
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    return r.json();
+function forceCloudPush(){
+  if(!cloudConfigured()){ toast('Önce veritabanı adresini girip kaydedin'); return; }
+  if(!cloudEnabled()){ toast('Otomatik senkronu açıp kaydedin'); return; }
+  cloudPush().then(function(){ toast('Buluta gönderildi'); });
+}
+function applyCloudRecord(rec, msg){
+  return deriveKey(sessionUser, sessionPass, rec.salt).then(function(key){
+    return decryptData(rec.vault, key).then(function(d){
+      data = applyDefaults(d);
+      generateRecurring();
+      save();
+      refreshAll();
+      toast(msg);
+      setCloudStatus('ok', 'buluttan yüklendi');
+    });
   });
 }
-function forceCloudPush(){
-  if(!cloudEnabled()){ toast('Önce URL ve anahtarı girip kaydedin'); return; }
-  cloudPush();
-}
 function forceCloudPull(){
-  if(!cloudEnabled()){ toast('Önce URL ve anahtarı girip kaydedin'); return; }
+  if(!cloudEnabled()){ toast('Bulut senkronu kapalı veya adres girilmemiş'); return; }
   setCloudStatus('syncing');
-  cloudPullRecord(sessionUser).then(function(rec){
+  cloudFindRecord(sessionUser, sessionCloudId).then(function(rec){
     if(!rec || !rec.vault){ toast('Bulutta veri bulunamadı'); setCloudStatus('ok'); return; }
-    return deriveKey(sessionUser, sessionPass, rec.salt).then(function(key){
-      return decryptData(rec.vault, key).then(function(d){
-        data = applyDefaults(d);
-        generateRecurring();
-        save();
-        refreshAll();
-        toast('Buluttaki veriler yüklendi');
-        setCloudStatus('ok', 'buluttan yüklendi');
-      });
-    });
+    return applyCloudRecord(rec, 'Buluttaki veriler yüklendi');
   }).catch(function(err){ setCloudStatus('error', err); });
 }
 function runLocalAutomation(){
   if(generateRecurring()){ save(); refreshAll(); }
 }
 function cloudSyncOnLoad(){
-  if(!cloudEnabled()){ runLocalAutomation(); return; }
-  cloudPullRecord(sessionUser).then(function(rec){
+  if(!cloudEnabled()){
+    runLocalAutomation();
+    setCloudStatus('off', cloudConfigured() ? 'Otomatik senkron kapalı' : 'Veritabanı adresi girilmemiş — veriler yalnızca bu cihazda');
+    return;
+  }
+  cloudFindRecord(sessionUser, sessionCloudId).then(function(rec){
     if(!rec || !rec.vault){ runLocalAutomation(); cloudPush(); return; }
+    if(rec._legacy){ toast('☁️ Verileriniz yeni otomatik bulut konumuna taşındı'); }
     var localVault = getVaultFor(sessionUser);
     var localTs = localVault ? (localVault.updatedAt||0) : 0;
     var remoteTs = rec.updatedAt || 0;
-    if(remoteTs > localTs){
-      return deriveKey(sessionUser, sessionPass, rec.salt).then(function(key){
-        return decryptData(rec.vault, key).then(function(d){
-          data = applyDefaults(d);
-          generateRecurring();
-          save();
-          refreshAll();
-          toast('Buluttan en güncel veriler yüklendi');
-          setCloudStatus('ok', 'buluttan yüklendi');
-        });
-      });
-    } else {
-      if(generateRecurring()){ save(); refreshAll(); } else { cloudPush(); }
+    if(remoteTs > localTs || rec.salt !== getUserSalt(sessionUser)){
+      return applyCloudRecord(rec, 'Buluttan en güncel veriler yüklendi');
     }
+    if(generateRecurring()){ save(); refreshAll(); } else { cloudPush(); }
   }).catch(function(err){ setCloudStatus('error', err); runLocalAutomation(); });
 }
 function renderCloudSettings(){
   var s = getCloudSettings();
   document.getElementById('cloudUrl').value = s.databaseURL || '';
+  document.getElementById('cloudUrl').placeholder = DEFAULT_CLOUD_URL || 'https://proje-adi-default-rtdb.europe-west1.firebasedatabase.app';
   document.getElementById('cloudKey').value = s.secretKey || '';
-  document.getElementById('cloudEnabled').checked = !!s.enabled;
+  document.getElementById('cloudEnabled').checked = s.enabled !== false;
   document.getElementById('authCloudUrl').value = s.databaseURL || '';
-  document.getElementById('authCloudKey').value = s.secretKey || '';
+  document.getElementById('authCloudUrl').placeholder = DEFAULT_CLOUD_URL || 'https://proje-adi-default-rtdb.europe-west1.firebasedatabase.app';
+  document.getElementById('cloudBuiltinNote').style.display = DEFAULT_CLOUD_URL ? '' : 'none';
+  document.getElementById('authCloudBox').style.display = DEFAULT_CLOUD_URL ? 'none' : '';
 }
 function saveCloudSettings(){
   var s = getCloudSettings();
-  s.databaseURL = document.getElementById('cloudUrl').value.trim();
+  var url = document.getElementById('cloudUrl').value.trim();
+  if(url && !/^https:\/\//.test(url)){ toast('Adres https:// ile başlamalı'); return; }
+  s.databaseURL = url;
   s.secretKey = document.getElementById('cloudKey').value.trim();
   s.enabled = document.getElementById('cloudEnabled').checked;
   setCloudSettings(s);
   toast('Bulut ayarları kaydedildi');
-  if(cloudEnabled()){ cloudPush(); } else { setCloudStatus('ok', 'senkron kapalı'); }
+  if(cloudEnabled()){ cloudSyncOnLoad(); } else { setCloudStatus('off', cloudConfigured() ? 'Otomatik senkron kapalı' : 'Veritabanı adresi girilmemiş'); }
 }
 
 /* ============================== GİRİŞ / KAYIT ============================== */
 var authMode = 'login';
 function showAuth(){
-  authMode = hasAnyUser() ? 'login' : 'register';
+  authMode = (hasAnyUser() || cloudConfigured()) ? 'login' : 'register';
   renderAuthMode();
   clearAuthFields();
   document.getElementById('authScreen').style.display = 'flex';
@@ -4130,7 +4169,9 @@ function hideAuth(){
 }
 function renderAuthMode(){
   document.getElementById('authTitle').textContent = authMode==='login' ? 'Giriş Yap' : 'Hesap Oluştur';
-  document.getElementById('authSub').textContent = authMode==='login' ? 'Verilerinize erişmek için giriş yapın.' : 'Verilerinizi şifreyle korumak için bir hesap oluşturun.';
+  document.getElementById('authSub').textContent = authMode==='login'
+    ? (cloudConfigured() ? 'Kullanıcı adı ve şifrenizle giriş yapın — verileriniz buluttan otomatik gelir.' : 'Verilerinize erişmek için giriş yapın.')
+    : 'Yeni bir hesap oluşturun. Zaten hesabınız varsa "Giriş Yap"a geçin.';
   document.getElementById('authSubmit').textContent = authMode==='login' ? 'Giriş Yap' : 'Hesap Oluştur';
   document.getElementById('authSwitch').textContent = authMode==='login' ? 'Hesap Oluştur' : 'Giriş Yap';
   document.getElementById('authPass2Wrap').style.display = authMode==='register' ? 'flex' : 'none';
@@ -4144,10 +4185,7 @@ function authError(msg){ document.getElementById('authError').textContent = msg;
 function readLoginCloud(){
   var c = getCloudSettings();
   var url = document.getElementById('authCloudUrl').value.trim();
-  var key = document.getElementById('authCloudKey').value.trim();
-  if(url) c.databaseURL = url;
-  if(key) c.secretKey = key;
-  setCloudSettings(c);
+  if(url && /^https:\/\//.test(url)){ c.databaseURL = url; setCloudSettings(c); }
 }
 function enterApp(){
   var tr = getSettings().targetHourlyRate;
@@ -4163,7 +4201,7 @@ function enterApp(){
 }
 function logout(){
   if(!confirm('Çıkış yapılsın mı? (Verileriniz cihazda şifreli olarak kalır.)')) return;
-  sessionUser = null; sessionPass = null;
+  sessionUser = null; sessionPass = null; sessionCloudId = null;
   keyCache = {id:null, key:null};
   data = defaultData();
   ['headerSearch','searchQuery'].forEach(function(id){ document.getElementById(id).value = ''; });
@@ -4185,6 +4223,22 @@ function authSubmit(){
 }
 function doRegister(user, pass){
   if(userExists(user)){ authError('Bu kullanıcı adı zaten kullanılıyor. Farklı bir kullanıcı adı seçin.'); return; }
+  if(cloudConfigured()){
+    document.getElementById('authSubmit').disabled = true;
+    deriveCloudId(user, pass).then(function(id){ return cloudFindRecord(user, id); }).catch(function(){ return null; }).then(function(rec){
+      document.getElementById('authSubmit').disabled = false;
+      if(rec && rec.vault){
+        authMode = 'login'; renderAuthMode();
+        authError('Bu kullanıcı adı ve şifreyle bulutta zaten bir hesap var. Yeni hesap açmayın — "Giriş Yap"a basın.');
+        return;
+      }
+      doRegisterLocal(user, pass);
+    });
+    return;
+  }
+  doRegisterLocal(user, pass);
+}
+function doRegisterLocal(user, pass){
   var legacy = loadLegacyPlaintext();
   var initial = legacy ? applyDefaults(legacy) : defaultData();
   var salt = bufToB64(randomBytes(16));
@@ -4207,26 +4261,42 @@ function doRegister(user, pass){
 }
 function doLogin(user, pass){
   var localSalt = getUserSalt(user);
+  var localVault = localSalt ? getVaultFor(user) : null;
   function proceed(salt, vault){
     return getSessionKey(user, pass, salt).then(function(key){
       return decryptData(vault, key);
     });
   }
-  var p;
-  if(localSalt){
-    var vault = getVaultFor(user);
-    if(!vault){ authError('Veri bulunamadı.'); return; }
-    p = proceed(localSalt, vault).then(function(d){ return {d:d, salt:localSalt, vault:vault, saveLocal:false}; });
-  } else {
-    p = cloudPullRecord(user).then(function(rec){
-      if(!rec || rec.username !== user || !rec.vault) throw new Error('no-account');
-      return proceed(rec.salt, rec.vault).then(function(d){ return {d:d, salt:rec.salt, vault:rec.vault, saveLocal:true}; });
-    });
-  }
-  p.then(function(res){
+  document.getElementById('authSubmit').disabled = true;
+  authError('');
+  document.getElementById('authSub').textContent = cloudConfigured() ? '☁️ Bulut kontrol ediliyor…' : 'Giriş yapılıyor…';
+  var cloudId = null;
+  var remoteP = deriveCloudId(user, pass).then(function(id){
+    cloudId = id;
+    return cloudConfigured() ? cloudFindRecord(user, id).catch(function(){ return null; }) : null;
+  });
+  remoteP.then(function(rec){
+    var hasRemote = rec && rec.vault && rec.salt;
+    // Bulut, cihazlar arasında esas kaynaktır: bu cihazda hesap yoksa, farklı bir hesapsa (farklı salt) veya buluttaki daha yeniyse buluttakini kullan
+    var preferRemote = hasRemote && (!localVault || rec.salt !== localSalt || (rec.updatedAt||0) > (localVault.updatedAt||0));
+    if(preferRemote){
+      var rv = {iv:rec.vault.iv, ct:rec.vault.ct, updatedAt:rec.updatedAt||Date.now()};
+      return proceed(rec.salt, rv).then(function(d){ return {d:d, salt:rec.salt, vault:rv, saveLocal:true, fromCloud:true}; })
+        .catch(function(e){
+          if(localVault) return proceed(localSalt, localVault).then(function(d){ return {d:d, salt:localSalt, vault:localVault, saveLocal:false}; });
+          throw e;
+        });
+    }
+    if(localVault) return proceed(localSalt, localVault).then(function(d){ return {d:d, salt:localSalt, vault:localVault, saveLocal:false}; });
+    throw new Error('no-account');
+  }).then(function(res){
     data = applyDefaults(res.d);
-    sessionUser = user; sessionPass = pass;
+    sessionUser = user; sessionPass = pass; sessionCloudId = cloudId;
     if(res.saveLocal){
+      if(localVault && localSalt !== res.salt){
+        // Bu cihazdaki eski (farklı) hesabı silmeden yedekle
+        try{ localStorage.setItem(vaultKeyFor(user) + '__yedek_' + Date.now(), JSON.stringify({salt:localSalt, vault:localVault})); }catch(e){}
+      }
       var reg = getAuthRegistry();
       reg.users[user] = {salt: res.salt};
       reg.lastUser = user;
@@ -4235,13 +4305,22 @@ function doLogin(user, pass){
     } else {
       setLastUser(user);
     }
+    if(res.fromCloud){
+      var cs = getCloudSettings(); cs.enabled = true; setCloudSettings(cs);
+    }
+    renderAuthMode();
     hideAuth(); enterApp();
-    toast('Giriş başarılı');
+    toast(res.fromCloud ? '☁️ Giriş başarılı — veriler buluttan yüklendi' : 'Giriş başarılı');
   }).catch(function(e){
-    if(e && e.message === 'no-account') authError('Hesap bulunamadı. "Hesap Oluştur" ile yeni hesap açın.');
+    renderAuthMode();
+    if(e && e.message === 'no-account'){
+      authError(cloudConfigured()
+        ? 'Kullanıcı adı veya şifre hatalı. (Bu cihazda ve bulutta bu bilgilerle bir hesap bulunamadı.)'
+        : 'Bu cihazda hesap yok. Başka cihazda açtığınız hesap için aşağıdaki "Bulut ayarları"na veritabanı adresini girin.');
+    }
     else if(e && e.name === 'OperationError') authError('Şifre yanlış.');
     else authError('Giriş başarısız: ' + (e && e.message ? e.message : e));
-  });
+  }).then(function(){ document.getElementById('authSubmit').disabled = false; });
 }
 
 /* ============================== YEDEKLEME ============================== */
